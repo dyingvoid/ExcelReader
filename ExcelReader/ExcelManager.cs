@@ -6,9 +6,9 @@ namespace ExcelReader;
 public static class ExcelManager
 {
     private static string _borderBackgroundColor = "FF92D050";
-    public static List<Schedule> ReadExcel(FileInfo excelFile)
+    public static Dictionary<string, Dictionary<DayOfWeek, Dictionary<int, List<string>>>> ReadExcel(FileInfo excelFile)
     {
-        var weekSchedule = new List<Schedule>();
+        var groupsSchedule = new Dictionary<string, Dictionary<DayOfWeek, Dictionary<int, List<string>>>>();
 
         using (var package = new ExcelPackage(excelFile))
         {
@@ -19,12 +19,14 @@ public static class ExcelManager
                 var borders = FindDaysBorders(sheet);
                 var groupsRowNumber = borders[DayOfWeek.Monday].Item1.Row();
                 var groups = FindGroupNamesCells(sheet, groupsRowNumber);
-                var smt = ParseDay(sheet, borders[DayOfWeek.Monday], groups["ПИ 101"]);
-                var weekSch = ParseWeek(sheet, borders, groups["ПИ 101"]);
+                foreach (var (group, groupColumnCell) in groups)
+                {
+                    groupsSchedule.Add(group, ParseWeek(sheet, borders, groupColumnCell));
+                }
             }
         }
 
-        return weekSchedule;
+        return groupsSchedule;
     }
 
     private static Dictionary<DayOfWeek, Dictionary<int, List<string>>> ParseWeek(ExcelWorksheet sheet, 
@@ -61,31 +63,45 @@ public static class ExcelManager
         return daySchedule;
     }
 
-    private static List<string> ParseClassCells(ExcelWorksheet sheet, int topBorderRow, ExcelRange columnCell)
+    private static int FindClassBottomBorder(ExcelWorksheet sheet, int row, ExcelRange columnCell)
     {
-        var list = new List<string>();
-        
         // Sometimes there is no bottom border in cells, so we count top border of this class time
         // And top border of next class time
         int topBorderCounter = 0;
-
+        
         // Classes in one class time divided by a thinner border
         // We store style of main border to define iterating range correctly
-        var cell = sheet.Cells[topBorderRow, columnCell.Column()];
+        var cell = sheet.Cells[row, columnCell.Column()];
         string mainBorderStyle = cell.Style.Border.Top.Style.ToString();
+        
+        while (true)
+        {
+            cell = sheet.Cells[row, columnCell.Column()];
+            
+            if (cell.Style.Border.Top.Style.ToString() == mainBorderStyle)
+                topBorderCounter++;
+            if (topBorderCounter > 1)
+                return row;
+
+            if (cell.Style.Border.Bottom.Style.ToString() == mainBorderStyle)
+                return row;
+
+            row++;
+        }
+    }
+
+    private static List<string> ParseClassCells(ExcelWorksheet sheet, int topBorderRow, ExcelRange columnCell)
+    {
+        var list = new List<string>();
+        int endRow = FindClassBottomBorder(sheet, topBorderRow, columnCell);
 
         // There may be several subgroups in one group. Exact number is unknown, way without number is not implemented
         for (var column = columnCell.Column(); column <= columnCell.Column() + 1; column++)
         {
-            while (true)
+            for (var row = topBorderRow; row <= endRow; ++row)
             {
-                cell = sheet.Cells[topBorderRow, column];
-            
-                if (cell.Style.Border.Top.Style.ToString() == mainBorderStyle)
-                    topBorderCounter++;
-                if (topBorderCounter > 1)
-                    break;
-
+                var cell = sheet.Cells[row, column];
+                
                 if (cell.Value != null)
                 {
                     string subject = cell.Value.ToString() + sheet.Cells[topBorderRow + 1, column].Value;
@@ -94,13 +110,8 @@ public static class ExcelManager
                     else
                         list.Add("2 группа: " + subject);
 
-                    topBorderRow++;
+                    row++;
                 }
-
-                if (cell.Style.Border.Bottom.Style.ToString() == mainBorderStyle)
-                    break;
-
-                topBorderRow++;
             }
         }
 
