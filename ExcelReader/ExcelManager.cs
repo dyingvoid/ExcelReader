@@ -51,6 +51,7 @@ public static class ExcelManager
         var rowStart = yAxisBorders.Item1.Row() + 1;
         var rowEnd = yAxisBorders.Item2.Row();
 
+        // 'B' column, column represents order of classes with numbers during day
         var columnOfSubjectNumber = 2;
         for (var row = rowStart; row <= rowEnd; ++row)
         {
@@ -104,7 +105,7 @@ public static class ExcelManager
                 
                 if (cell.Value != null)
                 {
-                    string subject = cell.Value.ToString() + sheet.Cells[topBorderRow + 1, column].Value;
+                    string subject = cell.Value.ToString() + sheet.Cells[row + 1, column].Value;
                     if(column == columnCell.Column())
                         list.Add("1 группа: " + subject);
                     else
