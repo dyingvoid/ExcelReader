@@ -1,12 +1,10 @@
-﻿using OfficeOpenXml;
-using OfficeOpenXml.Drawing.Vml;
+﻿using Microsoft.EntityFrameworkCore.Sqlite.Query.Internal;
+using OfficeOpenXml;
 
 namespace ExcelReader;
 
 public static class ExcelManager
 {
-    // Group can have 2 subjects at the same time for subgroups
-    private static int _numberOfColumnsForGroup = 2;
     private static string _borderBackgroundColor = "FF92D050";
     public static List<Schedule> ReadExcel(FileInfo excelFile)
     {
@@ -22,47 +20,88 @@ public static class ExcelManager
                 var groupsRowNumber = borders[DayOfWeek.Monday].Item1.Row();
                 var groups = FindGroupNamesCells(sheet, groupsRowNumber);
                 var smt = ParseDay(sheet, borders[DayOfWeek.Monday], groups["ПИ 101"]);
+                var weekSch = ParseWeek(sheet, borders, groups["ПИ 101"]);
             }
         }
 
         return weekSchedule;
     }
 
-    private static List<Subject> ParseDay(ExcelWorksheet sheet,Tuple<ExcelRange, ExcelRange> verticalBorders, ExcelRange columnCell)
+    private static Dictionary<DayOfWeek, Dictionary<int, List<string>>> ParseWeek(ExcelWorksheet sheet, 
+        Dictionary<DayOfWeek, Tuple<ExcelRange, ExcelRange>> daysBorders, ExcelRange columnCell)
     {
-        var list = new List<Subject>();
+        var dict = new Dictionary<DayOfWeek, Dictionary<int, List<string>>>();
 
-        var rowStart = verticalBorders.Item1.Row() + 1;
-        var rowEnd = verticalBorders.Item2.Row();
-        var columnStart = columnCell.Column();
-        var columnEnd = columnStart + 1;
+        for (var day = DayOfWeek.Monday; day <= DayOfWeek.Saturday; day++)
+        {
+            var daySubject = ParseDay(sheet, daysBorders[day], columnCell);
+            dict.TryAdd(day, daySubject);
+        }
+        
+        return dict;
+    }
+
+    private static Dictionary<int, List<string>> ParseDay(ExcelWorksheet sheet, 
+        Tuple<ExcelRange, ExcelRange> yAxisBorders, ExcelRange columnCell)
+    {
+        var daySchedule = new Dictionary<int, List<string>>();
+
+        var rowStart = yAxisBorders.Item1.Row() + 1;
+        var rowEnd = yAxisBorders.Item2.Row();
 
         var columnOfSubjectNumber = 2;
         for (var row = rowStart; row <= rowEnd; ++row)
         {
-            if (int.TryParse(sheet.Cells[row, columnOfSubjectNumber].Value.ToString(), out var number))
-            {
-                ParseClassCells(sheet, row, columnCell);
-            }
+            var value = sheet.Cells[row, columnOfSubjectNumber].Value;
+            
+            if (value != null && int.TryParse(value.ToString(), out var number))
+                daySchedule.TryAdd(number, ParseClassCells(sheet, row, columnCell));
         }
 
-        return list;
+        return daySchedule;
     }
 
-    private static List<Subject> ParseClassCells(ExcelWorksheet sheet, int topBorderRow, ExcelRange columnCell)
+    private static List<string> ParseClassCells(ExcelWorksheet sheet, int topBorderRow, ExcelRange columnCell)
     {
-        var list = new List<Subject>();
-        var test = new List<string>();
+        var list = new List<string>();
+        
+        // Sometimes there is no bottom border in cells, so we count top border of this class time
+        // And top border of next class time
+        int topBorderCounter = 0;
 
-        var row = topBorderRow;
-        var cell = sheet.Cells[row, columnCell.Column()];
-        while (cell.Style.Border.Bottom.Style.ToString() == "None")
+        // Classes in one class time divided by a thinner border
+        // We store style of main border to define iterating range correctly
+        var cell = sheet.Cells[topBorderRow, columnCell.Column()];
+        string mainBorderStyle = cell.Style.Border.Top.Style.ToString();
+
+        // There may be several subgroups in one group. Exact number is unknown, way without number is not implemented
+        for (var column = columnCell.Column(); column <= columnCell.Column() + 1; column++)
         {
-            var value = cell.Value;
-            if (value != null)
-                test.Add(value.ToString());
-            row++;
-            cell = sheet.Cells[row, columnCell.Column()];
+            while (true)
+            {
+                cell = sheet.Cells[topBorderRow, column];
+            
+                if (cell.Style.Border.Top.Style.ToString() == mainBorderStyle)
+                    topBorderCounter++;
+                if (topBorderCounter > 1)
+                    break;
+
+                if (cell.Value != null)
+                {
+                    string subject = cell.Value.ToString() + sheet.Cells[topBorderRow + 1, column].Value;
+                    if(column == columnCell.Column())
+                        list.Add("1 группа: " + subject);
+                    else
+                        list.Add("2 группа: " + subject);
+
+                    topBorderRow++;
+                }
+
+                if (cell.Style.Border.Bottom.Style.ToString() == mainBorderStyle)
+                    break;
+
+                topBorderRow++;
+            }
         }
 
         return list;
@@ -81,9 +120,9 @@ public static class ExcelManager
         return groups;
     }
 
-    private static Dictionary<DayOfWeek, Tuple<ExcelRange, ExcelRange?>> FindDaysBorders(ExcelWorksheet sheet)
+    private static Dictionary<DayOfWeek, Tuple<ExcelRange, ExcelRange>> FindDaysBorders(ExcelWorksheet sheet)
     {
-        var dayBorders = new Dictionary<DayOfWeek, Tuple<ExcelRange, ExcelRange?>>();
+        var dayBorders = new Dictionary<DayOfWeek, Tuple<ExcelRange, ExcelRange>>();
         
         // Better to check that style is not None, than this
         var list = FindDaySeparatorRows(sheet);
