@@ -1,4 +1,8 @@
-﻿using ExcelReader;
+﻿using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Unicode;
+using ExcelReader;
 using OfficeOpenXml;
 
 public class Program
@@ -40,5 +44,17 @@ public class Program
         string filePath = @"C:\Users\Dying\Downloads\Расписание ИИТ 1 сем 22-23.xlsx";
         var file = new FileInfo(filePath);
         var weekSchedule = ExcelManager.ReadExcel(file);
+        DictToJson(weekSchedule);
+    }
+    
+    public static void DictToJson<TDict>(TDict schedule)
+    {
+        var options = new JsonSerializerOptions
+        {
+            Encoder = JavaScriptEncoder.Create(UnicodeRanges.BasicLatin, UnicodeRanges.Cyrillic),
+            WriteIndented = true
+        };
+        string information = JsonSerializer.Serialize(schedule, options);
+        File.WriteAllText(@"..\..\..\testJson.json", information);
     }
 }

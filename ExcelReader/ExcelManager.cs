@@ -1,5 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Sqlite.Query.Internal;
-using OfficeOpenXml;
+﻿using OfficeOpenXml;
 
 namespace ExcelReader;
 
@@ -82,7 +81,7 @@ public static class ExcelManager
             if (cell.Style.Border.Top.Style.ToString() == mainBorderStyle)
                 topBorderCounter++;
             if (topBorderCounter > 1)
-                return row;
+                return row - 1;
 
             if (cell.Style.Border.Bottom.Style.ToString() == mainBorderStyle)
                 return row;
