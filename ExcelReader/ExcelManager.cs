@@ -1,10 +1,14 @@
 ﻿using OfficeOpenXml;
+using OfficeOpenXml.Style;
 
 namespace ExcelReader;
 
 public static class ExcelManager
 {
     private static string _borderBackgroundColor = "FF92D050";
+    private static string _mainBorderStyle;
+    private static ExcelBorderStyle _mainBorderSt;
+    private static Dictionary<int, List<Tuple<int, bool>>> test = new Dictionary<int, List<Tuple<int, bool>>>();
     public static Dictionary<string, Dictionary<DayOfWeek, Dictionary<int, List<string>>>> ReadExcel(FileInfo excelFile)
     {
         var groupsSchedule = new Dictionary<string, Dictionary<DayOfWeek, Dictionary<int, List<string>>>>();
@@ -17,15 +21,31 @@ public static class ExcelManager
             {
                 var borders = FindDaysBorders(sheet);
                 var groupsRowNumber = borders[DayOfWeek.Monday].Item1.Row();
+                DefineMainBorderStyle(sheet.Cells[groupsRowNumber, 1]);
+                _mainBorderStyle = _mainBorderSt.ToString();
                 var groups = FindGroupNamesCells(sheet, groupsRowNumber);
                 foreach (var (group, groupColumnCell) in groups)
                 {
                     groupsSchedule.Add(group, ParseWeek(sheet, borders, groupColumnCell));
+                    var x = test;
+                    x.Clear();
                 }
+                // Test(sheet);
             }
         }
-
+        
         return groupsSchedule;
+    }
+
+    private static void Test(ExcelWorksheet sheet)
+    {
+        // Sometimes there are invisible borders that different from mainBorderStyle,
+        // They can hide under it, this may cause errors
+        var l = new List<int>() { 3, 4, 5, 6, 7, 8 };
+        foreach (var i in l)
+        {
+            var list = FindRangesOfLessonInClassTime(sheet, 15, 140, sheet.Cells[15, i]);
+        }
     }
 
     private static Dictionary<DayOfWeek, Dictionary<int, List<string>>> ParseWeek(ExcelWorksheet sheet, 
@@ -42,63 +62,94 @@ public static class ExcelManager
         return dict;
     }
 
+    private static Dictionary<int, Tuple<int, int>> FindClassesBorders(ExcelWorksheet sheet, 
+        Tuple<ExcelRange, ExcelRange> dayBorders,
+        ExcelRange columnCell)
+    {
+        var dict = new Dictionary<int, Tuple<int, int>>();
+        // 'B' Column
+        int column = 2;
+        ExcelRange storedCell = null;
+        
+        for (var row = dayBorders.Item1.Row() + 1; row <= dayBorders.Item2.Row(); row++)
+        {
+            var value = sheet.Cells[row, column].Value;
+            
+            if (value != null && int.TryParse(value.ToString(), out var number))
+            {
+                if (storedCell != null)
+                {
+                    dict.Add(number - 1, Tuple.Create(storedCell.Row(), row - 1));
+                }
+                storedCell = sheet.Cells[row, column];
+            }
+        }
+        dict.Add(int.Parse(storedCell.Value.ToString()), Tuple.Create(storedCell.Row(), dayBorders.Item2.Row() - 1));
+        
+        return dict;
+    }
+
     private static Dictionary<int, List<string>> ParseDay(ExcelWorksheet sheet, 
         Tuple<ExcelRange, ExcelRange> yAxisBorders, ExcelRange columnCell)
     {
         var daySchedule = new Dictionary<int, List<string>>();
+        var testDict = FindClassesBorders(sheet, yAxisBorders, columnCell);
 
-        var rowStart = yAxisBorders.Item1.Row() + 1;
-        var rowEnd = yAxisBorders.Item2.Row();
-
-        // 'B' column, column represents order of classes with numbers during day
-        var columnOfSubjectNumber = 2;
-        for (var row = rowStart; row <= rowEnd; ++row)
+        foreach (var (classNumber, borders) in testDict)
         {
-            var value = sheet.Cells[row, columnOfSubjectNumber].Value;
-            
-            if (value != null && int.TryParse(value.ToString(), out var number))
-                daySchedule.TryAdd(number, ParseClassCells(sheet, row, columnCell));
+            daySchedule.TryAdd(classNumber, ParseClassCells(sheet, borders, columnCell));
         }
 
         return daySchedule;
     }
 
-    private static int FindClassBottomBorder(ExcelWorksheet sheet, int row, ExcelRange columnCell)
+    private static List<Tuple<int, bool>> FindRangesOfLessonInClassTime(ExcelWorksheet sheet, 
+        int topBorderRow, int bottomBorderRow, ExcelRange columnCell)
     {
-        // Sometimes there is no bottom border in cells, so we count top border of this class time
-        // And top border of next class time
-        int topBorderCounter = 0;
-        
-        // Classes in one class time divided by a thinner border
-        // We store style of main border to define iterating range correctly
-        var cell = sheet.Cells[row, columnCell.Column()];
-        string mainBorderStyle = cell.Style.Border.Top.Style.ToString();
-        
-        while (true)
+        var list = new List<Tuple<int, bool>>();
+
+        for (var row = topBorderRow + 1; row < bottomBorderRow; row++)
         {
-            cell = sheet.Cells[row, columnCell.Column()];
+            var cell = sheet.Cells[row, columnCell.Column()];
+            var bottomBorderStyle = cell.Style.Border.Bottom.Style;
+            var topBorderStyle = cell.Style.Border.Top.Style;
+
+            if (bottomBorderStyle != ExcelBorderStyle.None)
+                list.Add(Tuple.Create(row, true));
             
-            if (cell.Style.Border.Top.Style.ToString() == mainBorderStyle)
-                topBorderCounter++;
-            if (topBorderCounter > 1)
-                return row - 1;
-
-            if (cell.Style.Border.Bottom.Style.ToString() == mainBorderStyle)
-                return row;
-
-            row++;
+            if(topBorderStyle != ExcelBorderStyle.None)
+                list.Add(Tuple.Create(row, false));
         }
+
+        /*if (list.Count > 1)
+        {
+            for (var i = 0; i < list.Count - 1; i++)
+            {
+                if (list[i + 1].Item1 == list[i].Item1 - 1 && list[i + 1].Item2 == false && list[i].Item2)
+                    list.RemoveAt(i + 1);
+            }
+        }*/
+        if(test.ContainsKey(columnCell.Column()))
+            test[columnCell.Column()].AddRange(list);
+        else
+        {
+            test.Add(columnCell.Column(), list);
+        }
+        return list;
     }
 
-    private static List<string> ParseClassCells(ExcelWorksheet sheet, int topBorderRow, ExcelRange columnCell)
+    private static List<string> ParseClassCells(ExcelWorksheet sheet, Tuple<int, int> borders,
+        ExcelRange columnCell)
     {
         var list = new List<string>();
-        int endRow = FindClassBottomBorder(sheet, topBorderRow, columnCell);
 
         // There may be several subgroups in one group. Exact number is unknown, way without number is not implemented
         for (var column = columnCell.Column(); column <= columnCell.Column() + 1; column++)
         {
-            for (var row = topBorderRow; row <= endRow; ++row)
+            var test = FindRangesOfLessonInClassTime(sheet, borders.Item1, 
+                borders.Item2, 
+                sheet.Cells[columnCell.Row(), column]);
+            for (var row = borders.Item1; row <= borders.Item2; ++row)
             {
                 var cell = sheet.Cells[row, column];
                 
@@ -160,6 +211,11 @@ public static class ExcelManager
         list.Add(cellsWithBorder.Last());
         
         return list;
+    }
+
+    private static void DefineMainBorderStyle(ExcelRange cellWithMainBorder)
+    {
+        _mainBorderSt = cellWithMainBorder.Style.Border.Bottom.Style;
     }
 
     private static List<ExcelRange?> FindAllCellsRows(ExcelWorksheet sheet, int column, Predicate<ExcelRange> predicate)
